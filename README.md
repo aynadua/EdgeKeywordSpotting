@@ -5,8 +5,76 @@ microcontroller budget: an MFCC front end written from the FFT up so it stays
 implementable in C, a depthwise-separable CNN of ~23k parameters, and int8
 quantisation with the size and latency cost measured rather than assumed.
 
-> **Status:** the full benchmark run is reproduced by `make all`; measured
-> results are committed in `reports/` and summarised below.
+**94.5% accuracy on the 12-class task** with a 23,180-parameter DS-CNN, from a
+**49.6 KB int8 model** that runs in 0.074 ms on one CPU core. The float model
+misses the 80 KB budget; the quantised one makes it.
+
+![budget](reports/budget.png)
+
+---
+
+## Results
+
+Held-out test split, 4,980 clips, speakers disjoint from training.
+
+| Model | Accuracy | Keyword accuracy | False alarms | Params | Size | p50 latency |
+|---|---:|---:|---:|---:|---:|---:|
+| Linear baseline | 0.4665 | 0.4480 | 0.4481 | 252 | — | — |
+| DS-CNN (PyTorch) | 0.9452 | 0.9465 | 0.0607 | 23,180 | — | — |
+| DS-CNN (fp32 ONNX) | 0.9452 | 0.9465 | 0.0607 | — | 92.5 KB | 0.067 ms |
+| **DS-CNN (int8 ONNX)** | **0.9450** | 0.9433 | **0.0475** | — | **49.6 KB** | 0.074 ms |
+
+94.5% is in line with published DS-CNN results on this benchmark, which is the
+point of using the official splits: the number is comparable to other people's.
+
+### Four things in that table worth reading
+
+**The baseline is not a straw man, and it fails badly.** A linear model on
+time-pooled MFCC statistics gets 46.7%, and false-alarms on 44.8% of
+non-keyword audio — a device that wakes up half the time it hears speech. It
+is permutation-invariant over time by construction, so the gap to 94.5% is
+precisely what temporal structure is worth here. The DS-CNN had already passed
+it (86.6%) after one epoch.
+
+**int8 halves the model and is what makes the budget.** 92.5 KB → 49.6 KB for
+0.02 percentage points of accuracy. The float model *fails* the 80 KB budget
+and the quantised one passes it, which is the whole argument for quantisation
+stated as a pass/fail rather than a nice-to-have.
+
+**Quantisation did not make it faster — it made it slightly slower.** 0.074 ms
+against 0.067 ms at p50. That is the honest measurement and it is worth
+keeping: on x86 through ONNX Runtime, a QDQ graph inserts quantise/dequantise
+operators around each convolution, and on a network this small that overhead
+costs more than the cheaper integer arithmetic saves. On the actual target —
+an MCU running CMSIS-NN int8 kernels, with no float unit to fall back on — the
+ordering reverses. The number here is a proxy for the target, not a
+substitute, and it should not be quoted as an MCU speedup.
+
+**int8 reduced false alarms**, 0.0607 → 0.0475, while top-line accuracy fell
+very slightly. Quantisation noise appears to make the model marginally less
+willing to commit to a keyword. With a single run this is an observation, not
+a finding — it is one seed, and the effect is small enough that it could
+reverse.
+
+### Per-class recall
+
+| Class | Recall | | Class | Recall |
+|---|---:|---|---|---:|
+| `_silence_` | 0.998 | | `left` | 0.968 |
+| `stop` | 0.981 | | `right` | 0.967 |
+| `yes` | 0.971 | | `no` | 0.941 |
+| `on` | 0.939 | | `up` | 0.936 |
+| `go` | 0.935 | | `off` | 0.920 |
+| `down` | 0.904 | | `_unknown_` | **0.881** |
+
+`_silence_` is essentially solved, as it should be. The weakest class by a
+clear margin is `_unknown_`, which is the honest shape of the problem: it is
+an open set — twenty-five words standing in for "every word that is not a
+keyword" — and the model has to reject an unbounded category from a bounded
+sample of it. The confusions among keywords are phonetically sensible
+(`down`/`go`, `off`/`up`), not arbitrary.
+
+![confusion](reports/confusion_dscnn.png)
 
 ---
 
@@ -140,6 +208,12 @@ Downloads Speech Commands V2 (~2.3 GB), caches MFCC features, trains the
 baseline and the DS-CNN, evaluates on the test split, exports and quantises,
 and writes `reports/`. Around 30 minutes on 4 CPU cores. No GPU.
 
+Training runs for 18 epochs with early stopping (patience 5). That budget is
+chosen so a full reproduction finishes in a reasonable time on a CPU, not
+because 18 is optimal; the DS-CNN reached 0.9463 validation accuracy on its
+last epoch and was still improving slowly. More epochs would likely buy a few
+tenths of a point.
+
 Stages run independently:
 
 ```bash
@@ -152,6 +226,10 @@ pytest
 
 ## Honest limits
 
+- **A 6% false-alarm rate is too high to ship.** On continuous audio that is
+  a spurious wake every few minutes. Fixing it means a confidence threshold
+  with a reject option and a proper detection-error trade-off curve, not a
+  better argmax.
 - **Accuracy is measured on 1-second pre-segmented clips**, which is not how a
   wake word is used. A deployed spotter runs a sliding window over continuous
   audio, and its real figure of merit is false alarms per hour against a
