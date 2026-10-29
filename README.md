@@ -19,41 +19,41 @@ Held-out test split, 4,980 clips, speakers disjoint from training.
 
 | Model | Accuracy | Keyword accuracy | False alarms | Params | Size | p50 latency |
 |---|---:|---:|---:|---:|---:|---:|
-| Linear baseline | 0.4665 | 0.4480 | 0.4481 | 252 | — | — |
-| DS-CNN (PyTorch) | 0.9452 | 0.9465 | 0.0607 | 23,180 | — | — |
-| DS-CNN (fp32 ONNX) | 0.9452 | 0.9465 | 0.0607 | — | 92.5 KB | 0.067 ms |
-| **DS-CNN (int8 ONNX)** | **0.9450** | 0.9433 | **0.0475** | — | **49.6 KB** | 0.074 ms |
+| Linear baseline | 0.4665 | 0.4480 | 0.4481 | 252 | n/a | n/a |
+| DS-CNN (PyTorch) | 0.9452 | 0.9465 | 0.0607 | 23,180 | n/a | n/a |
+| DS-CNN (fp32 ONNX) | 0.9452 | 0.9465 | 0.0607 | n/a | 92.5 KB | 0.067 ms |
+| **DS-CNN (int8 ONNX)** | **0.9450** | 0.9433 | **0.0475** | n/a | **49.6 KB** | 0.074 ms |
 
 94.5% is in line with published DS-CNN results on this benchmark, which is the
 point of using the official splits: the number is comparable to other people's.
 
 ### Four things in that table worth reading
 
-**The baseline is not a straw man, and it fails badly.** A linear model on
+The baseline is not a straw man, and it fails badly. A linear model on
 time-pooled MFCC statistics gets 46.7%, and false-alarms on 44.8% of
-non-keyword audio — a device that wakes up half the time it hears speech. It
+non-keyword audio, so a device that wakes up half the time it hears speech. It
 is permutation-invariant over time by construction, so the gap to 94.5% is
 precisely what temporal structure is worth here. The DS-CNN had already passed
 it (86.6%) after one epoch.
 
-**int8 halves the model and is what makes the budget.** 92.5 KB → 49.6 KB for
+int8 halves the model and is what makes the budget: 92.5 KB down to 49.6 KB for
 0.02 percentage points of accuracy. The float model *fails* the 80 KB budget
 and the quantised one passes it, which is the whole argument for quantisation
 stated as a pass/fail rather than a nice-to-have.
 
-**Quantisation did not make it faster — it made it slightly slower.** 0.074 ms
+Quantisation did not make it faster. It made it slightly slower: 0.074 ms
 against 0.067 ms at p50. That is the honest measurement and it is worth
 keeping: on x86 through ONNX Runtime, a QDQ graph inserts quantise/dequantise
 operators around each convolution, and on a network this small that overhead
-costs more than the cheaper integer arithmetic saves. On the actual target —
-an MCU running CMSIS-NN int8 kernels, with no float unit to fall back on — the
+costs more than the cheaper integer arithmetic saves. On the actual target,
+an MCU running CMSIS-NN int8 kernels with no float unit to fall back on, the
 ordering reverses. The number here is a proxy for the target, not a
 substitute, and it should not be quoted as an MCU speedup.
 
-**int8 reduced false alarms**, 0.0607 → 0.0475, while top-line accuracy fell
+int8 reduced false alarms, 0.0607 down to 0.0475, while top-line accuracy fell
 very slightly. Quantisation noise appears to make the model marginally less
 willing to commit to a keyword. With a single run this is an observation, not
-a finding — it is one seed, and the effect is small enough that it could
+a finding. It is one seed, and the effect is small enough that it could
 reverse.
 
 ### Per-class recall
@@ -69,8 +69,8 @@ reverse.
 
 `_silence_` is essentially solved, as it should be. The weakest class by a
 clear margin is `_unknown_`, which is the honest shape of the problem: it is
-an open set — twenty-five words standing in for "every word that is not a
-keyword" — and the model has to reject an unbounded category from a bounded
+an open set, twenty-five words standing in for "every word that is not a
+keyword", and the model has to reject an unbounded category from a bounded
 sample of it. The confusions among keywords are phonetically sensible
 (`down`/`go`, `off`/`up`), not arbitrary.
 
@@ -80,8 +80,8 @@ sample of it. The confusions among keywords are phonetically sensible
 
 ## The task, and why it is the 12-class one
 
-The benchmark everybody quotes is **V2-12**: ten target keywords — *yes, no,
-up, down, left, right, on, off, stop, go* — plus `_silence_` and `_unknown_`.
+The benchmark everybody quotes is **V2-12**: ten target keywords (*yes, no,
+up, down, left, right, on, off, stop, go*) plus `_silence_` and `_unknown_`.
 
 That framing is not decoration. A wake-word system spends essentially all of
 its life hearing neither a keyword nor nothing in particular: it hears the
@@ -124,15 +124,15 @@ overlaps: {'train_val': 0, 'train_test': 0, 'val_test': 0}
   → orthonormal DCT-II, keep 10 coefficients    → 10 × 49
 ```
 
-490 values per inference, under 2 KB in int8 — a sane working set for a device
-with 64 KB of RAM.
+490 values per inference, under 2 KB in int8. That is a sane working set for
+a device with 64 KB of RAM.
 
 It is written from the FFT up rather than calling `librosa` because an
 always-on spotter runs its feature extraction *on the microcontroller*,
 continuously, on a battery. Whatever happens in the front end has to be a few
 hundred lines of C against a CMSIS-DSP FFT, and `librosa.feature.mfcc` hides
-exactly the decisions — frame size, FFT length, filterbank layout, how many
-coefficients survive — that determine whether that is possible.
+exactly the decisions that determine whether that is possible: frame size,
+FFT length, filterbank layout, how many coefficients survive.
 
 Being hand-written, it is verified against physics rather than against another
 library: a 250 Hz, 1 kHz or 3 kHz tone must peak in the mel band that contains
@@ -145,7 +145,7 @@ it; digital silence must not produce `-inf`; the geometry must yield exactly
 
 Scaling a waveform multiplies every mel band's power by the same factor, which
 after the log is a constant offset, which lands entirely in C0. That holds
-*when every band carries real energy* — verified on broadband noise, where
+*when every band carries real energy*, verified on broadband noise, where
 halving the gain moves C0 by 8.8 and the remaining coefficients by 0.005.
 
 It does **not** hold for speech. Speech leaves many mel bands near-empty, and
@@ -159,26 +159,26 @@ are asserted in `tests/test_frontend.py` so neither can regress silently.
 
 ## The model
 
-**DS-CNN**, the reference microcontroller architecture from ARM's *Hello Edge*
-work. A wide first convolution spanning the MFCC axis, then four
+The model is a DS-CNN, the reference microcontroller architecture from ARM's
+*Hello Edge* work. A wide first convolution spanning the MFCC axis, then four
 depthwise-separable blocks, global average pooling, a linear head.
 
 The arithmetic is the whole point: a full 3×3 convolution over C channels
 costs `9·C·C` multiplies per position, a depthwise 3×3 followed by a 1×1
-pointwise costs `9·C + C·C`. At 64 channels that is 36,864 against 4,672 —
+pointwise costs `9·C + C·C`. At 64 channels that is 36,864 against 4,672,
 roughly eight times cheaper, for a small accuracy cost. On a device whose
 inference budget is measured in milliwatts, that trade is obviously worth
 making.
 
-**The baseline is a linear model** on time-pooled MFCC statistics (mean and
+The baseline is a linear model on time-pooled MFCC statistics (mean and
 standard deviation per coefficient, 252 parameters). It is there so the CNN
 has to justify itself. It is also permutation-invariant over time by
 construction, which makes the comparison informative: whatever the CNN gains,
 it gains from temporal structure.
 
-**Augmentation** is random time shift (±100 ms) and background noise mixing,
-re-applied every epoch to the *waveform* — so the front end sees a different
-signal each time — rather than cached once. A wake word never starts exactly
+Augmentation is random time shift (±100 ms) and background noise mixing,
+re-applied every epoch to the *waveform* rather than cached once, so the front
+end sees a different signal each time. A wake word never starts exactly
 at the window boundary, and a device listening in a kitchen hears a kitchen.
 
 ## Deployment budget
@@ -226,23 +226,23 @@ pytest
 
 ## Honest limits
 
-- **A 6% false-alarm rate is too high to ship.** On continuous audio that is
+- A 6% false-alarm rate is too high to ship. On continuous audio that is
   a spurious wake every few minutes. Fixing it means a confidence threshold
   with a reject option and a proper detection-error trade-off curve, not a
   better argmax.
-- **Accuracy is measured on 1-second pre-segmented clips**, which is not how a
+- Accuracy is measured on 1-second pre-segmented clips, which is not how a
   wake word is used. A deployed spotter runs a sliding window over continuous
   audio, and its real figure of merit is false alarms per hour against a
   detection threshold. Streaming evaluation is not implemented.
-- **No on-device measurement.** Latency here is single-threaded x86 through
+- No on-device measurement. Latency here is single-threaded x86 through
   ONNX Runtime, which is a proxy for an MCU, not a substitute. Real numbers
   need CMSIS-NN on the target part.
-- **int8 only.** Whether this survives further compression — structured
-  pruning, 4-bit weights — is unexplored.
-- **English, and the corpus's speaker distribution.** Speech Commands skews
+- int8 only. Whether this survives further compression (structured pruning,
+  4-bit weights) is unexplored.
+- English only, with the corpus's speaker distribution. Speech Commands skews
   towards certain accents; per-accent performance is unmeasured and is the
   kind of gap that matters for a consumer device.
-- **No level normalisation**, as described above.
+- No level normalisation, as described above.
 
 ## Layout
 
@@ -256,6 +256,7 @@ src/kws/
   evaluate.py   accuracy, per-class recall, false-alarm rates
   export.py     ONNX export, static int8 quantisation, MCU budget check
   plots.py      figures
+  config.py     typed config loaded from YAML
   cli.py        `kws <stage>`
 tests/          59 tests, including the speaker-leakage and front-end checks
 ```
@@ -267,7 +268,7 @@ tests/          59 tests, including the speaker-leakage and front-end checks
 - Zhang, Suda, Lai & Chandra, *Hello Edge: Keyword Spotting on
   Microcontrollers*, 2017.
 - Howard et al., *MobileNets: efficient convolutional neural networks for
-  mobile vision applications*, 2017 — for depthwise separable convolutions.
+  mobile vision applications*, 2017, for depthwise separable convolutions.
 
 ## Licence
 

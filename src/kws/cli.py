@@ -195,9 +195,9 @@ def cmd_report(cfg: Config, args: argparse.Namespace) -> None:
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for record in records + artefacts:
-        size = f"{record['size_kb']:.0f} KB" if "size_kb" in record else "—"
-        latency = f"{record['latency_ms_p50']:.2f} ms" if "latency_ms_p50" in record else "—"
-        params = f"{record['n_parameters']:,}" if "n_parameters" in record else "—"
+        size = f"{record['size_kb']:.0f} KB" if "size_kb" in record else "n/a"
+        latency = f"{record['latency_ms_p50']:.2f} ms" if "latency_ms_p50" in record else "n/a"
+        params = f"{record['n_parameters']:,}" if "n_parameters" in record else "n/a"
         alarms = record.get("false_alarm_overall", float("nan"))
         lines.append(
             f"| {record['model']} | {record['accuracy']:.4f} | "
